@@ -2,6 +2,14 @@ from fgo_sdk.utils.time_tool import get_timestamp, is_free_fp_draw_available, ge
 from fgo_sdk.utils.wiki_api import search_wiki_svt_or_item
 from fgo_sdk.utils.crypto import get_asset_bundle
 from fgo_sdk.utils.battle_crypto import cat_game5, mouse_game5, calc_battle_status
+from fgo_sdk.utils.version_helper import (
+    VersionInfo,
+    fetch_version_info,
+    fetch_game_data,
+    fetch_app_ver_code,
+    GAME_DATA_URL,
+    APP_VER_CODE_URL,
+)
 from fgo_sdk.utils.gacha_helper import (
     VisibleGacha,
     GachaSubInfo,
@@ -25,6 +33,13 @@ __all__ = [
     "cat_game5",
     "mouse_game5",
     "calc_battle_status",
+    # Version helpers
+    "VersionInfo",
+    "fetch_version_info",
+    "fetch_game_data",
+    "fetch_app_ver_code",
+    "GAME_DATA_URL",
+    "APP_VER_CODE_URL",
     # Gacha helpers
     "VisibleGacha",
     "GachaSubInfo",

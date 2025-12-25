@@ -17,6 +17,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from fgo_sdk.models.player_data import UserQuest
+from fgo_sdk.models.gacha_data import GachaType
 from fgo_sdk.utils.time_tool import get_timestamp, is_free_fp_draw_available
 
 
@@ -163,7 +164,7 @@ class VisibleGacha:
     gacha_id: int
     gacha_sub_id: int
     name: str
-    type: str  # 'friendPoint', 'stone', 'chargeStone', 'payGacha'
+    type: GachaType
     image_id: int
     open_at: int
     close_at: int
@@ -348,7 +349,7 @@ def get_visible_gachas(
         free_draw_at = user_gacha_info.get('freeDrawAt', 0)
 
         # Determine gacha type
-        gacha_type = selected_sub.get('type', 'unknown')
+        gacha_type = GachaType.from_string(selected_sub.get('type', 'unknown'))
 
         # Check free draw availability
         free_draw_flag = selected_sub.get('freeDrawFlag', 0) == 1

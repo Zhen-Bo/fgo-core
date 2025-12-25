@@ -14,6 +14,7 @@ from fgo_sdk.models.game_data import GameData, VersionData
 from fgo_sdk.models.config import AccountConfig, SettingsConfig, DeviceConfig, GameConfig, UrlConfig
 from fgo_sdk.models.request_data import BasicFormData
 from fgo_sdk.models.shop_data import WikiShopItem
+from fgo_sdk.models.gacha_data import GachaType
 from fgo_sdk.models.battle_data import (
     DropItem,
     FollowerInfo,
@@ -44,6 +45,7 @@ __all__ = [
     "UrlConfig",
     "BasicFormData",
     "WikiShopItem",
+    "GachaType",
     "DropItem",
     "FollowerInfo",
     "FollowerListResult",
