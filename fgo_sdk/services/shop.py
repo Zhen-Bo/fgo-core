@@ -19,26 +19,6 @@ class ShopService:
     def __init__(self, client: FgoClient):
         self.client = client
 
-    def buy_blue_apple(self, num: int) -> PurchaseResult:
-        """
-        Purchase blue apples using blue apple saplings.
-
-        Args:
-            num: Number of blue apples to purchase
-
-        Returns:
-            PurchaseResult with success status and quantity
-        """
-        if num < 1:
-            return PurchaseResult(
-                success=False,
-                item_name="青銅蘋果",
-                quantity=0,
-                error_message="購買數量必須大於 0"
-            )
-
-        return self.purchase_item(13000000, num, "青銅蘋果")
-
     def purchase_item(self, shop_id: int, num: int, name: str = "") -> PurchaseResult:
         """
         Execute a single shop purchase.
