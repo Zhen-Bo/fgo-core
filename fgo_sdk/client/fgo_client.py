@@ -12,6 +12,9 @@ from fgo_sdk.utils.time_tool import get_timestamp
 # Disable warnings
 requests.packages.urllib3.disable_warnings()
 
+# Default timeout for API requests (in seconds)
+DEFAULT_API_TIMEOUT: int = 10
+
 
 class FgoClient:
     """Low-level HTTP client for FGO API communication."""
@@ -60,7 +63,9 @@ class FgoClient:
         form_data.lastAccessTime = get_timestamp()
         form_data.idempotencyKey = str(uuid.uuid4())
         if with_auth:
-            form_data.authCode = self._auth_handler.get_auth_code(form_data.model_dump(exclude_none=True))
+            form_data.authCode = self._auth_handler.get_auth_code(
+                form_data.model_dump(exclude_none=True)
+            )
         return form_data
 
     def get_login_data(self):
@@ -81,7 +86,9 @@ class FgoClient:
         form_data.deviceInfo = self._device.device_info
         form_data.appCheckErrorMessage = self._device.app_check_error_message
 
-        form_data.authCode = self._auth_handler.get_auth_code(form_data.model_dump(exclude_none=True))
+        form_data.authCode = self._auth_handler.get_auth_code(
+            form_data.model_dump(exclude_none=True)
+        )
 
         return form_data
 
@@ -95,19 +102,43 @@ class FgoClient:
         if extra_fields:
             data.update(extra_fields)
 
-        data['authCode'] = self._auth_handler.get_auth_code(data)
+        data["authCode"] = self._auth_handler.get_auth_code(data)
         return data
 
-    def post(self, endpoint: str, data: dict, operate_name: str) -> dict:
-        """Send POST request to FGO API."""
+    def post(
+        self,
+        endpoint: str,
+        data: dict,
+        operate_name: str,
+        timeout: int = DEFAULT_API_TIMEOUT,
+    ) -> dict:
+        """Send POST request to FGO API.
+
+        Args:
+            endpoint: API endpoint path (e.g., "/gacha/draw")
+            data: Request data dictionary
+            operate_name: Operation name for error messages
+            timeout: Request timeout in seconds
+
+        Returns:
+            Response JSON dictionary
+        """
         url = f"{self.settings.game.host}{endpoint}?_userId={self._account.id}"
 
-        if 'authCode' not in data or data.get('authCode') is None:
-            data['authCode'] = self._auth_handler.get_auth_code(data)
+        if "authCode" not in data or data.get("authCode") is None:
+            data["authCode"] = self._auth_handler.get_auth_code(data)
 
         request_body = urlencode(data)
 
-        response = self.session.post(url, data=request_body, verify=False)
+        try:
+            response = self.session.post(
+                url, data=request_body, verify=False, timeout=timeout
+            )
+        except requests.exceptions.Timeout:
+            raise
+        except requests.exceptions.RequestException:
+            raise
+
         response_json = response.json()
         self._check_response(operate_name, response_json)
         return response_json

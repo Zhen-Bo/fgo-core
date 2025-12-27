@@ -51,3 +51,4 @@ accounts/
 *.key
 
 /archive
+/cli

@@ -1,6 +1,6 @@
 import base64
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import msgpack
 
@@ -9,8 +9,7 @@ from fgo_sdk.models.player_data import ItemInfo, PresentBox, PresentInfo
 from fgo_sdk.utils.wiki_api import search_wiki_svt_or_item
 
 # Default timeout for API requests (in seconds)
-# Format: (connect_timeout, read_timeout)
-DEFAULT_API_TIMEOUT: Tuple[int, int] = (10, 15)
+DEFAULT_API_TIMEOUT: int = 10
 
 
 @dataclass

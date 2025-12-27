@@ -193,8 +193,7 @@ class OpenGacha:
 
 
 # Default timeout for API requests (in seconds)
-# Format: (connect_timeout, read_timeout)
-DEFAULT_API_TIMEOUT = (10, 15)
+DEFAULT_API_TIMEOUT: int = 10
 
 
 def fetch_common_release(
