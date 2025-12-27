@@ -1,10 +1,7 @@
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Optional
 
 from fgo_sdk.client.fgo_client import FgoClient
-from fgo_sdk.models.shop_data import WikiShopItem
-from fgo_sdk.models.player_data import PlayerInfo, PlayerOwnedItem, UserShopItem
-from fgo_sdk.utils.time_tool import get_used_act_amount
 
 
 @dataclass
@@ -22,84 +19,40 @@ class ShopService:
     def __init__(self, client: FgoClient):
         self.client = client
 
-    def buy_blue_apple(self, player_info: PlayerInfo, player_item: PlayerOwnedItem) -> Optional[PurchaseResult]:
+    def buy_blue_apple(self, num: int) -> PurchaseResult:
         """
         Purchase blue apples using blue apple saplings.
 
+        Args:
+            num: Number of blue apples to purchase
+
         Returns:
-            PurchaseResult if purchase was attempted, None if conditions not met
+            PurchaseResult with success status and quantity
         """
-        if player_item.blue_apple_sapling < 1:
+        if num < 1:
             return PurchaseResult(
                 success=False,
                 item_name="青銅蘋果",
                 quantity=0,
-                error_message="青銅樹苗不足"
+                error_message="購買數量必須大於 0"
             )
 
-        act_now = player_info.act_max - get_used_act_amount(player_info.act_full_recover_time)
-        if act_now >= 40:
-            available_buy_count = int(act_now / 40)
-            buy_count = (
-                available_buy_count
-                if player_item.blue_apple_sapling >= available_buy_count
-                else player_item.blue_apple_sapling
-            )
+        return self.purchase_item(13000000, num, "青銅蘋果")
 
-            return self._purchase_item("13000000", buy_count, "青銅蘋果")
-
-        return None
-
-    def buy_summon_tickets(
-        self,
-        player_item: PlayerOwnedItem,
-        user_shop: List[UserShopItem],
-        tick_data: List[WikiShopItem]
-    ) -> List[PurchaseResult]:
+    def purchase_item(self, shop_id: int, num: int, name: str = "") -> PurchaseResult:
         """
-        Purchase summon tickets from the shop.
+        Execute a single shop purchase.
+
+        Args:
+            shop_id: Shop item ID
+            num: Quantity to purchase (caller is responsible for calculating this)
+            name: Item name for logging (optional)
 
         Returns:
-            List of PurchaseResult for each purchase attempt
+            PurchaseResult with success status and quantity
         """
-        results = []
-        user_shop_map = {item.shopId: item.num for item in user_shop}
-
-        for item in tick_data:
-            shop_id = item.baseShopId
-            limit_num = item.limitNum
-            price = item.cost.amount
-            name = item.detail.replace('\n', ' ')
-
-            purchased_num = user_shop_map.get(shop_id, 0)
-            remaining_num = limit_num - purchased_num
-
-            if remaining_num <= 0:
-                continue
-
-            max_affordable = player_item.mana // price
-            if max_affordable == 0:
-                results.append(PurchaseResult(
-                    success=False,
-                    item_name=name,
-                    quantity=0,
-                    error_message="魔力稜鏡不足"
-                ))
-                continue
-
-            buy_count = min(remaining_num, max_affordable)
-            result = self._purchase_item(str(shop_id), buy_count, name)
-            results.append(result)
-
-            if result.success:
-                player_item.mana -= buy_count * price
-
-        return results
-
-    def _purchase_item(self, shop_id: str, num: int, name: str) -> PurchaseResult:
-        """Execute a purchase request."""
         data = self.client.create_form_data({
-            'id': shop_id,
+            'id': str(shop_id),
             'num': num,
         })
 
