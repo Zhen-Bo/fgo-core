@@ -8,10 +8,14 @@ from fgo_sdk.client.fgo_client import FgoClient
 from fgo_sdk.models.player_data import ItemInfo, PresentBox, PresentInfo
 from fgo_sdk.utils.wiki_api import search_wiki_svt_or_item
 
+# Default timeout for API requests (in seconds)
+DEFAULT_API_TIMEOUT: int = 10
+
 
 @dataclass
 class ReceivedPresent:
     """Information about a received present."""
+
     item_info: ItemInfo
     quantity: int
 
@@ -19,6 +23,7 @@ class ReceivedPresent:
 @dataclass
 class PresentResult:
     """Result of present receiving operation."""
+
     received_items: List[ReceivedPresent]
     is_all_received: bool
     total_requested: int
@@ -28,31 +33,45 @@ class PresentResult:
 @dataclass
 class ExchangeSelectableItem:
     """Information about a selectable item in an exchange ticket."""
-    idx: int              # Selection index (1-based, used as itemSelectIdx)
-    item_id: int          # The item ID to receive
-    item_name: str        # Item name
-    item_icon: str        # Item icon URL
-    num: int              # Quantity per exchange
-    require_num: int      # Number of tickets required
+
+    idx: int  # Selection index (1-based, used as itemSelectIdx)
+    item_id: int  # The item ID to receive
+    item_name: str  # Item name
+    item_icon: str  # Item icon URL
+    num: int  # Quantity per exchange
+    require_num: int  # Number of tickets required
 
 
 @dataclass
 class ExchangeTicketInfo:
     """Information about an exchange ticket in the present box."""
-    present_id: int
+
+    present_ids: List[
+        int
+    ]  # All present IDs for this ticket type (for aggregated tickets)
     object_id: int
     name: str
-    quantity: int
+    quantity: int  # Total quantity across all presents
     selectable_items: List[ExchangeSelectableItem] = field(default_factory=list)
 
 
 @dataclass
 class ExchangeTicketResult:
     """Result of exchange ticket receiving operation."""
+
     success: bool
     item_name: str = ""
     quantity: int = 0
     error_message: str = ""
+
+
+@dataclass
+class PresentBoxData:
+    """Cached present box data for efficient display."""
+
+    receivable_count: int
+    exchange_tickets: List[ExchangeTicketInfo]
+    raw_box: PresentBox
 
 
 class PresentService:
@@ -67,8 +86,91 @@ class PresentService:
         data = self.client.create_form_data()
         response_data = self.client.post("/present/list", data, "取得禮物箱內容")
 
-        box_info = response_data['cache']['replaced']['userPresentBox']
+        box_info = response_data["cache"]["replaced"]["userPresentBox"]
         return PresentBox(userPresentBox=box_info)
+
+    def load_present_box(self) -> PresentBoxData:
+        """
+        Load present box data for display, returning all info in one call.
+
+        This method fetches the present box once and calculates both the
+        receivable count and exchange tickets from the same data.
+
+        Returns:
+            PresentBoxData containing receivable count, exchange tickets, and raw box
+        """
+        box = self.get_present_box()
+        search_cache = self._get_search_cache(box.userPresentBox)
+
+        # Calculate receivable count (excluding exchange tickets)
+        extra_need_receive_item_ids: List[int] = []
+        receivable_count = sum(
+            1
+            for present in box.userPresentBox
+            if (
+                present.giftType == 2 or present.objectId in extra_need_receive_item_ids
+            )
+            and not search_cache[present.objectId].is_exchange_ticket
+        )
+
+        # Build exchange tickets from the same data
+        ticket_map: Dict[int, Dict] = {}
+        for present in box.userPresentBox:
+            if present.giftType != 2:
+                continue
+
+            item_info = search_cache.get(present.objectId)
+            if item_info and item_info.is_exchange_ticket:
+                obj_id = present.objectId
+                if obj_id not in ticket_map:
+                    ticket_map[obj_id] = {
+                        "present_ids": [],
+                        "name": item_info.name,
+                        "quantity": 0,
+                    }
+                ticket_map[obj_id]["present_ids"].append(present.presentId)
+                ticket_map[obj_id]["quantity"] += present.num
+
+        # Build exchange ticket list with selectable items
+        exchange_tickets: List[ExchangeTicketInfo] = []
+        for obj_id, data in ticket_map.items():
+            selectable_items = self._get_exchange_ticket_details(obj_id)
+            exchange_tickets.append(
+                ExchangeTicketInfo(
+                    present_ids=data["present_ids"],
+                    object_id=obj_id,
+                    name=data["name"],
+                    quantity=data["quantity"],
+                    selectable_items=selectable_items,
+                )
+            )
+
+        return PresentBoxData(
+            receivable_count=receivable_count,
+            exchange_tickets=exchange_tickets,
+            raw_box=box,
+        )
+
+    def get_receivable_count(self) -> int:
+        """
+        Get the count of receivable presents (excluding exchange tickets).
+
+        Returns:
+            Number of presents that can be received with receive_presents()
+        """
+        box = self.get_present_box()
+        search_cache = self._get_search_cache(box.userPresentBox)
+
+        extra_need_receive_item_ids: List[int] = []
+        count = sum(
+            1
+            for present in box.userPresentBox
+            if (
+                present.giftType == 2 or present.objectId in extra_need_receive_item_ids
+            )
+            and not search_cache[present.objectId].is_exchange_ticket
+        )
+        return count
 
     def receive_presents(self) -> PresentResult:
         """
@@ -87,7 +189,9 @@ class PresentService:
         need_receive_present = [
             present
             for present in box.userPresentBox
-            if (present.giftType == 2 or present.objectId in extra_need_receive_item_ids)
+            if (
+                present.giftType == 2 or present.objectId in extra_need_receive_item_ids
+            )
             and not search_cache[present.objectId].is_exchange_ticket
         ]
 
@@ -100,7 +204,9 @@ class PresentService:
             )
 
         # Prepare present IDs for request
-        msgpack_data = msgpack.packb([present.presentId for present in need_receive_present])
+        msgpack_data = msgpack.packb(
+            [present.presentId for present in need_receive_present]
+        )
         present_ids_b64 = base64.b64encode(msgpack_data).decode()
 
         # Receive presents
@@ -127,14 +233,18 @@ class PresentService:
 
     def _receive_present(self, present_ids: str) -> List[PresentInfo]:
         """Execute present receive request."""
-        data = self.client.create_form_data({
-            'presentIds': present_ids,
-            'itemSelectIdx': "0",
-            'itemSelectNum': "0",
-        })
+        data = self.client.create_form_data(
+            {
+                "presentIds": present_ids,
+                "itemSelectIdx": "0",
+                "itemSelectNum": "0",
+            }
+        )
 
         response_data = self.client.post("/present/receive", data, "領取禮物")
-        return PresentBox(userPresentBox=response_data['cache']['deleted']['userPresentBox']).userPresentBox
+        return PresentBox(
+            userPresentBox=response_data["cache"]["deleted"]["userPresentBox"]
+        ).userPresentBox
 
     def _get_search_cache(self, data: List[PresentInfo]) -> Dict[int, ItemInfo]:
         """Build cache of item info for presents."""
@@ -148,13 +258,16 @@ class PresentService:
 
     def get_exchange_tickets(self) -> List[ExchangeTicketInfo]:
         """
-        Get exchange tickets from the present box.
+        Get exchange tickets from the present box, aggregated by ticket type.
 
         Returns:
-            List of ExchangeTicketInfo containing ticket details and selectable items
+            List of ExchangeTicketInfo containing ticket details and selectable items.
+            Tickets of the same type are aggregated into a single entry.
         """
         box = self.get_present_box()
-        exchange_tickets: List[ExchangeTicketInfo] = []
+
+        # Aggregate tickets by object_id
+        ticket_map: Dict[int, Dict] = {}
 
         for present in box.userPresentBox:
             if present.giftType != 2:
@@ -165,18 +278,35 @@ class PresentService:
             )
 
             if item_info.is_exchange_ticket:
-                selectable_items = self._get_exchange_ticket_details(present.objectId)
-                exchange_tickets.append(ExchangeTicketInfo(
-                    present_id=present.presentId,
-                    object_id=present.objectId,
-                    name=item_info.name,
-                    quantity=present.num,
+                obj_id = present.objectId
+                if obj_id not in ticket_map:
+                    ticket_map[obj_id] = {
+                        "present_ids": [],
+                        "name": item_info.name,
+                        "quantity": 0,
+                    }
+                ticket_map[obj_id]["present_ids"].append(present.presentId)
+                ticket_map[obj_id]["quantity"] += present.num
+
+        # Build result list with selectable items
+        exchange_tickets: List[ExchangeTicketInfo] = []
+        for obj_id, data in ticket_map.items():
+            selectable_items = self._get_exchange_ticket_details(obj_id)
+            exchange_tickets.append(
+                ExchangeTicketInfo(
+                    present_ids=data["present_ids"],
+                    object_id=obj_id,
+                    name=data["name"],
+                    quantity=data["quantity"],
                     selectable_items=selectable_items,
-                ))
+                )
+            )
 
         return exchange_tickets
 
-    def _get_exchange_ticket_details(self, item_id: int) -> List[ExchangeSelectableItem]:
+    def _get_exchange_ticket_details(
+        self, item_id: int
+    ) -> List[ExchangeSelectableItem]:
         """
         Get selectable items for an exchange ticket from the wiki API.
 
@@ -190,100 +320,120 @@ class PresentService:
 
         try:
             # Get exchange ticket data
-            response = requests.get(f"{self.wiki_api_url}/nice/JP/item/{item_id}")
+            url = f"{self.wiki_api_url}/nice/JP/item/{item_id}"
+            response = requests.get(url, timeout=DEFAULT_API_TIMEOUT)
             response.raise_for_status()
             ticket_data = response.json()
 
-            item_selects = ticket_data.get('itemSelects', [])
+            item_selects = ticket_data.get("itemSelects", [])
             if not item_selects:
                 return []
 
             # Collect all item IDs we need to look up
             item_ids_to_fetch: List[int] = []
             for select in item_selects:
-                for gift in select.get('gifts', []):
-                    if gift.get('type') == 'item':
-                        item_ids_to_fetch.append(gift['objectId'])
+                for gift in select.get("gifts", []):
+                    if gift.get("type") == "item":
+                        item_ids_to_fetch.append(gift["objectId"])
 
             # Fetch item info for all items
             item_info_cache: Dict[int, Dict] = {}
             for obj_id in set(item_ids_to_fetch):
                 try:
-                    item_resp = requests.get(f"{self.wiki_api_url}/nice/JP/item/{obj_id}")
+                    item_url = f"{self.wiki_api_url}/nice/JP/item/{obj_id}"
+                    item_resp = requests.get(item_url, timeout=DEFAULT_API_TIMEOUT)
                     if item_resp.status_code == 200:
                         item_info_cache[obj_id] = item_resp.json()
+                except requests.exceptions.Timeout:
+                    pass
                 except Exception:
                     pass
 
             # Build selectable items list
             selectable_items: List[ExchangeSelectableItem] = []
             for select in item_selects:
-                idx = select.get('idx', 0)
-                require_num = select.get('requireNum', 1)
+                idx = select.get("idx", 0)
+                require_num = select.get("requireNum", 1)
 
-                for gift in select.get('gifts', []):
-                    if gift.get('type') != 'item':
+                for gift in select.get("gifts", []):
+                    if gift.get("type") != "item":
                         continue
 
-                    obj_id = gift['objectId']
-                    num = gift.get('num', 1)
+                    obj_id = gift["objectId"]
+                    num = gift.get("num", 1)
                     cached_info = item_info_cache.get(obj_id, {})
 
-                    selectable_items.append(ExchangeSelectableItem(
-                        idx=idx,
-                        item_id=obj_id,
-                        item_name=cached_info.get('name', f'Unknown Item ({obj_id})'),
-                        item_icon=cached_info.get('icon', ''),
-                        num=num,
-                        require_num=require_num,
-                    ))
+                    selectable_items.append(
+                        ExchangeSelectableItem(
+                            idx=idx,
+                            item_id=obj_id,
+                            item_name=cached_info.get(
+                                "name", f"Unknown Item ({obj_id})"
+                            ),
+                            item_icon=cached_info.get("icon", ""),
+                            num=num,
+                            require_num=require_num,
+                        )
+                    )
 
             return selectable_items
 
+        except requests.exceptions.Timeout:
+            return []
         except Exception:
             return []
 
     def receive_exchange_ticket(
         self,
-        present_id: int,
+        present_ids: List[int],
         item_select_idx: int,
         item_select_num: int,
     ) -> ExchangeTicketResult:
         """
-        Receive an exchange ticket with a specific item selection.
+        Receive exchange tickets with a specific item selection.
+
+        Each present_id represents one ticket. To exchange N items, you need
+        N * require_num present_ids (each present is one ticket).
 
         Args:
-            present_id: The present ID of the exchange ticket
+            present_ids: List of present IDs to use for exchange
             item_select_idx: The index of the selected item (1-based)
-            item_select_num: The quantity to exchange
+            item_select_num: The quantity to exchange (must match len(present_ids) / require_num)
 
         Returns:
             ExchangeTicketResult with success status and received item info
         """
         if item_select_idx < 1:
             return ExchangeTicketResult(
-                success=False,
-                error_message="item_select_idx must be >= 1"
+                success=False, error_message="item_select_idx must be >= 1"
             )
 
         if item_select_num < 1:
             return ExchangeTicketResult(
-                success=False,
-                error_message="item_select_num must be >= 1"
+                success=False, error_message="item_select_num must be >= 1"
             )
 
-        msgpack_data = msgpack.packb([present_id])
+        if not present_ids:
+            return ExchangeTicketResult(
+                success=False, error_message="No present_ids provided"
+            )
+
+        msgpack_data = msgpack.packb(present_ids)
         present_ids_b64 = base64.b64encode(msgpack_data).decode()
 
-        data = self.client.create_form_data({
-            'presentIds': present_ids_b64,
-            'itemSelectIdx': str(item_select_idx),
-            'itemSelectNum': str(item_select_num),
-        })
+        data = self.client.create_form_data(
+            {
+                "presentIds": present_ids_b64,
+                "itemSelectIdx": str(item_select_idx),
+                "itemSelectNum": str(item_select_num),
+            }
+        )
 
         try:
             response_data = self.client.post("/present/receive", data, "領取交換券")
-            deleted_presents = response_data['cache']['deleted'].get('userPresentBox', [])
+            deleted_presents = response_data["cache"]["deleted"].get(
+                "userPresentBox", []
+            )
 
             if deleted_presents:
                 return ExchangeTicketResult(
@@ -292,11 +442,7 @@ class PresentService:
                 )
             else:
                 return ExchangeTicketResult(
-                    success=False,
-                    error_message="No presents were received"
+                    success=False, error_message="No presents were received"
                 )
         except Exception as e:
-            return ExchangeTicketResult(
-                success=False,
-                error_message=str(e)
-            )
+            return ExchangeTicketResult(success=False, error_message=str(e))

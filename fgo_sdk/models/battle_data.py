@@ -44,6 +44,7 @@ class RecoveryResult:
     """Result of AP recovery request."""
     success: bool
     current_ap: int = 0
+    act_recover_at: int = 0  # Timestamp when AP will be fully recovered
     apple_type: int = 0
     error_message: Optional[str] = None
 

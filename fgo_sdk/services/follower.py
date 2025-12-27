@@ -1,7 +1,6 @@
 """Follower service for support friend list."""
 
 import time
-from typing import List, Optional
 
 from fgo_sdk.client.fgo_client import FgoClient
 from fgo_sdk.models.battle_data import FollowerInfo, FollowerListResult
@@ -103,51 +102,3 @@ class FollowerService:
                 success=False,
                 error_message=str(e),
             )
-
-    def find_target_follower(
-        self,
-        followers: List[FollowerInfo],
-        target_class_id: int,
-        target_svt_id: Optional[int] = None,
-        target_equip_id: Optional[int] = None,
-        require_mlb: bool = True,
-        min_follower_type: int = 0,
-    ) -> Optional[FollowerInfo]:
-        """
-        Find a follower matching the specified criteria.
-
-        Args:
-            followers: List of followers to search
-            target_class_id: Required servant class ID
-            target_svt_id: Servant ID to match (optional)
-            target_equip_id: Craft essence ID to match (optional)
-            require_mlb: Require max limit broken equip (limit_count == 4)
-            min_follower_type: Minimum follower type (0=stranger, 1=non-friend, 2=friend)
-
-        Returns:
-            FollowerInfo if found, None otherwise
-        """
-        for follower in followers:
-            # Check follower type
-            if follower.follower_type < min_follower_type:
-                continue
-
-            # Check class (required)
-            if follower.class_id != target_class_id:
-                continue
-
-            # Check servant ID if specified
-            if target_svt_id is not None and follower.svt_id != target_svt_id:
-                continue
-
-            # Check equip if specified
-            if target_equip_id is not None:
-                if follower.equip_svt_id != target_equip_id:
-                    continue
-                # Check MLB requirement only when equip is specified
-                if require_mlb and follower.equip_limit_count != 4:
-                    continue
-
-            return follower
-
-        return None
