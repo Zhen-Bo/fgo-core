@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import List
+from dataclasses import dataclass, field
+from typing import Dict, List
 
 from fgo_sdk.client.fgo_client import FgoClient
 from fgo_sdk.models.player_data import (
@@ -17,7 +17,10 @@ class LoginResult:
     """Result of login operation."""
     player_data: PlayerData
     user_quest: List[UserQuest]
-    last_free_friend_point_draw: int
+    user_gacha: List[dict]  # Raw userGacha data for gacha free draw tracking
+    user_event: Dict[int, dict] = field(default_factory=dict)  # {eventId: event_data}
+    user_privilege: List[dict] = field(default_factory=list)  # Raw userPrivilege data
+    last_free_friend_point_draw: int = 0
 
 
 class LoginService:
@@ -88,11 +91,26 @@ class LoginService:
             for item in data["cache"]["updated"]["userShop"]:
                 user_shop.append(UserShopItem(shopId=item["shopId"], num=item["num"]))
 
-        # Parse last free FP draw time
+        # Parse user gacha data (for free draw tracking)
+        user_gacha = data['cache']['replaced'].get('userGacha', [])
+
+        # Parse last free FP draw time (for backwards compatibility)
         try:
-            last_free_friend_point_draw = data['cache']['replaced']['userGacha'][0]['freeDrawAt']
+            last_free_friend_point_draw = user_gacha[0]['freeDrawAt'] if user_gacha else 0
         except Exception:
             last_free_friend_point_draw = 0
+
+        # Parse user event data (for eventScriptPlay condition checking)
+        # userEvent contains eventId -> {tutorial2, scriptFlag, etc.}
+        user_event: Dict[int, dict] = {}
+        for event in data['cache']['replaced'].get('userEvent', []):
+            event_id = event.get('eventId', 0)
+            if event_id > 0:
+                user_event[event_id] = event
+
+        # Parse user privilege data (for privilegeValid condition checking)
+        # userPrivilege contains privilege info with createdAt timestamp
+        user_privilege: List[dict] = data['cache']['replaced'].get('userPrivilege', [])
 
         # Parse user quests
         user_quest = []
@@ -125,5 +143,8 @@ class LoginService:
         return LoginResult(
             player_data=player_data,
             user_quest=user_quest,
+            user_gacha=user_gacha,
+            user_event=user_event,
+            user_privilege=user_privilege,
             last_free_friend_point_draw=last_free_friend_point_draw,
         )

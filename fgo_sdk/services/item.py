@@ -45,10 +45,12 @@ class ItemService:
             user_game = updated.get("userGame", [{}])[0]
 
             current_ap = user_game.get("actPoint", 0)
+            act_recover_at = user_game.get("actRecoverAt", 0)
 
             return RecoveryResult(
                 success=True,
                 current_ap=current_ap,
+                act_recover_at=act_recover_at,
                 apple_type=apple_type,
             )
 
