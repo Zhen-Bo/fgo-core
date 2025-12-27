@@ -1,13 +1,11 @@
 """Gacha service for drawing from gacha pools."""
 
-import warnings
+import json
 from dataclasses import dataclass
 from typing import List, Optional
 
 from fgo_sdk.client.fgo_client import FgoClient
-from fgo_sdk.models.player_data import GachaObtainItem, UserQuest
-from fgo_sdk.utils.gacha_helper import select_gacha_sub
-from fgo_sdk.utils.time_tool import is_free_fp_draw_available
+from fgo_sdk.models.player_data import GachaObtainItem
 from fgo_sdk.utils.wiki_api import search_wiki_svt_or_item
 
 
@@ -29,8 +27,11 @@ class GachaService:
     be handled by the application layer.
 
     Example usage:
-        # Application layer determines which pool to draw
-        visible_gachas = get_visible_gachas(...)
+        # SDK layer: get time-filtered open gachas
+        open_gachas = get_open_gachas(gacha_data)
+
+        # Application layer: filter by user conditions
+        visible_gachas = filter_visible_gachas(open_gachas, ...)
         selected = visible_gachas[0]  # User/app selects
 
         # SDK just executes the draw
@@ -50,6 +51,7 @@ class GachaService:
         gacha_id: int,
         gacha_sub_id: int,
         num: int = 10,
+        story_adjust_ids: Optional[List[int]] = None,
     ) -> GachaResult:
         """
         Draw from a gacha pool.
@@ -59,17 +61,22 @@ class GachaService:
         - Determining which pool to draw from
         - Checking if free draws are available
         - Validating draw conditions
+        - Calculating story_adjust_ids for Story Summon pools
 
         Args:
             gacha_id: The main gacha pool ID (e.g., 1 for friend point)
             gacha_sub_id: The specific sub-pool ID
             num: Number of draws (default: 10)
+            story_adjust_ids: List of story adjust IDs based on cleared quests
+                (required for Story Summon gacha 21001)
 
         Returns:
             GachaResult with obtained items
         """
         try:
-            raw_items = self._send_draw_request(gacha_id, gacha_sub_id, num)
+            raw_items = self._send_draw_request(
+                gacha_id, gacha_sub_id, num, story_adjust_ids
+            )
             obtain_items = self._parse_gacha_items(raw_items)
 
             return GachaResult(
@@ -88,6 +95,7 @@ class GachaService:
         gacha_id: int,
         gacha_sub_id: int,
         num: int,
+        story_adjust_ids: Optional[List[int]] = None,
     ) -> List[dict]:
         """
         Execute gacha draw request.
@@ -96,15 +104,36 @@ class GachaService:
             gacha_id: The main gacha pool ID
             gacha_sub_id: The specific sub-pool ID
             num: Number of draws
+            story_adjust_ids: List of story adjust IDs for Story Summon gacha
 
         Returns:
             List of raw gacha item dictionaries from the response
         """
-        data = self.client.create_form_data({
+        # Get basic form data for values (but we'll reorder manually)
+        basic_data = self.client.create_form_data()
+
+        # Build request with EXACT parameter order matching successful request:
+        # storyAdjustIds, selectBonusList, userId, authKey, appVer, dateVer,
+        # lastAccessTime, verCode, idempotencyKey, gachaId, num, ticketItemId,
+        # shopIdIndex, gachaSubId, dataVer, authCode
+        data = {
+            'storyAdjustIds': json.dumps(story_adjust_ids or []),
+            'selectBonusList': '',
+            'userId': basic_data['userId'],
+            'authKey': basic_data['authKey'],
+            'appVer': basic_data['appVer'],
+            'dateVer': basic_data['dateVer'],
+            'lastAccessTime': basic_data['lastAccessTime'],
+            'verCode': basic_data['verCode'],
+            'idempotencyKey': basic_data['idempotencyKey'],
             'gachaId': gacha_id,
-            'gachaSubId': gacha_sub_id,
             'num': num,
-        })
+            'ticketItemId': 0,
+            'shopIdIndex': 1,
+            'gachaSubId': gacha_sub_id,
+            'dataVer': basic_data['dataVer'],
+            # authCode will be added by post()
+        }
 
         response_data = self.client.post(
             "/gacha/draw",
@@ -139,92 +168,3 @@ class GachaService:
             )
 
         return obtain_items
-
-    # =========================================================================
-    # Deprecated methods - kept for backward compatibility
-    # =========================================================================
-
-    def _get_friend_point_gacha_sub_id(
-        self,
-        user_quest: List[UserQuest],
-        gacha_data: List,
-    ) -> int:
-        """
-        Find the appropriate friend point gacha sub ID.
-
-        .. deprecated::
-            This method will be removed in a future version.
-            Use gacha_helper.select_gacha_sub() directly in application layer.
-        """
-        warnings.warn(
-            "_get_friend_point_gacha_sub_id is deprecated. "
-            "Use gacha_helper.select_gacha_sub() in application layer.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        fp_gacha_subs = [
-            g for g in gacha_data
-            if g.get('gachaId', g.get('id', 0)) == 1
-        ]
-        selected = select_gacha_sub(fp_gacha_subs, user_quest, self.wiki_api_url)
-        return selected['id'] if selected else -1
-
-    def draw_fp_gacha(
-        self,
-        last_free_draw: int,
-        user_quest: List[UserQuest],
-        gacha_data: List,
-    ) -> GachaResult:
-        """
-        Draw from the free friend point gacha.
-
-        .. deprecated::
-            This method will be removed in a future version.
-            Use draw() method instead. Free draw availability checks
-            should be done in the application layer using
-            gacha_helper.check_gacha_free_draw() or time_tool.is_free_fp_draw_available().
-
-        Args:
-            last_free_draw: Timestamp of last free FP draw
-            user_quest: User's quest progress
-            gacha_data: Available gacha pool data
-
-        Returns:
-            GachaResult with obtained items
-        """
-        warnings.warn(
-            "draw_fp_gacha is deprecated. Use draw() method instead. "
-            "Free draw checks should be in application layer.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
-        # Decision logic (should be in application layer)
-        is_available = is_free_fp_draw_available(last_free_draw)
-        if not is_available:
-            return GachaResult(
-                success=False,
-                items=[],
-                error_message="今日已經抽過友情池",
-            )
-
-        # Selection logic (should be in application layer)
-        fp_gacha_subs = [
-            g for g in gacha_data
-            if g.get('gachaId', g.get('id', 0)) == 1
-        ]
-        selected = select_gacha_sub(fp_gacha_subs, user_quest, self.wiki_api_url)
-
-        if selected is None:
-            return GachaResult(
-                success=False,
-                items=[],
-                error_message="找不到開啟中的友情池",
-            )
-
-        # Delegate to the new generic draw method
-        return self.draw(
-            gacha_id=1,
-            gacha_sub_id=selected['id'],
-            num=10,
-        )

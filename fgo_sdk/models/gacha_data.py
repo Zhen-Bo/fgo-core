@@ -5,6 +5,15 @@ Gacha-related data models and enumerations.
 from enum import Enum
 
 
+# Mapping from raw API integer type to GachaType string value
+_GACHA_TYPE_MAP = {
+    1: "stone",        # 聖晶石池
+    2: "chargeStone",  # 付費石池 (legacy, not used in current game data)
+    3: "friendPoint",  # 友情點數池
+    7: "chargeStone",  # 付費確定池 (スタートダッシュ等)
+}
+
+
 class GachaType(str, Enum):
     """
     Gacha pool types.
@@ -13,9 +22,23 @@ class GachaType(str, Enum):
     """
     FRIEND_POINT = "friendPoint"  # 友情點數池 (type=3 in raw API)
     STONE = "stone"               # 聖晶石池 (type=1 in raw API)
-    CHARGE_STONE = "chargeStone"  # 付費石池
+    CHARGE_STONE = "chargeStone"  # 付費石池 (type=2 in raw API)
     PAY_GACHA = "payGacha"        # 付費抽卡
     UNKNOWN = "unknown"           # 未知類型
+
+    @classmethod
+    def from_int(cls, value: int) -> "GachaType":
+        """
+        Convert integer type from raw API to GachaType enum.
+
+        Args:
+            value: Integer value from mstGacha.type (1=stone, 2=chargeStone, 3=friendPoint)
+
+        Returns:
+            Corresponding GachaType enum value, or UNKNOWN if not recognized.
+        """
+        str_value = _GACHA_TYPE_MAP.get(value, "unknown")
+        return cls.from_string(str_value)
 
     @classmethod
     def from_string(cls, value: str) -> "GachaType":
