@@ -1,6 +1,6 @@
 [project]
 name = "fgo-sdk"
-version = "0.0.1-alpha"
+version = "0.0.2"
 description = "Python SDK for Fate/Grand Order API communication and data parsing"
 authors = [
     {name = "Zhen-Bo"}
